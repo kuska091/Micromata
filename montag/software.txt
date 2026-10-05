@@ -3,3 +3,7 @@ wir haben:
 - VSCode installiert --> brew install --cask visual-studio-code
 - aws-cdk installiert --> brew install aws-cdk
 - node installiert --> brew install node
+-------------------------------------------------------------------------------------------------
+Ich habe meine erste Webseite mit AWS gebaut.
+Ich habe eine AWS server mit CDK erstellt & deployed.
+Ich habe die sachen die ich heute gemacht habe ins Github gepusht
