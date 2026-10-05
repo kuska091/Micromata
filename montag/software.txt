@@ -1,0 +1,5 @@
+wir haben:
+- brew heruntergeladen (https://brew.sh/)
+- VSCode installiert --> brew install --cask visual-studio-code
+- aws-cdk installiert --> brew install aws-cdk
+- node installiert --> brew install node
