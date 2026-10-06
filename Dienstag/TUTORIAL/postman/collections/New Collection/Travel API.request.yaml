@@ -1,0 +1,13 @@
+$kind: http-request
+description: ""
+url: http://127.0.0.1:5000/destinations
+method: GET
+body:
+  type: json
+  content: |-
+    {
+        "destination": "Vietnam",
+        "country": "Hanoi",
+        "rating": 4.5
+    }
+order: 1791289240684

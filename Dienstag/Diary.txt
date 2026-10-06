@@ -1,0 +1,11 @@
+Was ich heute gemacht habe:
+
+Was ist API?
+eine Website mit CDK programmiert
+eine API programmiert
+Postman Benutzt
+CDK von C# zu Python verändert
+
+
+
+
