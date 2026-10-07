@@ -1,8 +1,29 @@
 from flask import Flask, jsonify, request
 
 from flask_sqlalchemy import SQLAlchemy #ORM
+import os
+import secrets
+
+
+
+
 
 app = Flask(__name__)
+
+
+
+API_KEY = os.environ.get("API_KEY")
+
+@app.before_request
+def check_api_key():
+    key = request.headers.get("X-API-Key")
+    if not key:
+        return jsonify({"error": "API key fehlt"}), 401
+    if not API_KEY or not secrets.compare_digest(key, API_KEY):
+        return jsonify({"error": "API key ungültig"}), 403                              #export API_KEY="your_api_key"  # Setze deinen API-Schlüssel
+                                                                                        #python -c "import secrets; print(secrets.token_urlsafe(32))"
+                                                                                        
+
 
 #Create Database
 
@@ -39,7 +60,7 @@ def get_destinations():
     destinations = Destination.query.all()
     return jsonify([destination.to_dict() for destination in destinations])
 
-@app.route('/destinations/<int:destination_id>', methods=['POST'])
+@app.route('/destinations/<int:destination_id>', methods=['GET'])
 def get_destination(destination_id):
     destination = Destination.query.get(destination_id)
     if destination:
