@@ -1,0 +1,5 @@
+Was ich heute gemacht habe:
+-API key erstellen und zugang nur mit einem API key erlauben
+-Aufbau der Detailing Webseite aufschreiben
+-Eine Tabelle für Datenbank erstellen
+-Datenbank nach Normalisierungsstufen(1 bis 3) neu erstellen
