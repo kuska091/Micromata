@@ -1,0 +1,10 @@
+Was ich heute gemacht habe:
+zugänge für Kunden und Admin eingestellt
+bearbeitungsrechte für kunden und admin eingestellt
+
+
+ToDo:
+
+/register -----> OK / already exists pls login
+/login --------> bearer_token(jwt) {Name, Vorname, mail, password.....}
+

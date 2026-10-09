@@ -1,295 +1,3 @@
-'''from datetime import date, time
-import os
-import secrets
-
-from flask import Flask, jsonify, request
-from flask_sqlalchemy import SQLAlchemy
-
-app = Flask(__name__)
-
-# ---------------------------------------------------------------
-# API-Key-Schutz (wie vorher)
-#   export API_KEY="dein_key"
-#   python -c "import secrets; print(secrets.token_urlsafe(32))"
-# ---------------------------------------------------------------
-API_KEY = os.environ.get("API_KEY")
-
-
-@app.before_request
-def check_api_key():
-    key = request.headers.get("X-API-Key")
-    if not key:
-        return jsonify({"error": "API key fehlt"}), 401
-    if not API_KEY or not secrets.compare_digest(key, API_KEY):
-        return jsonify({"error": "API key ungültig"}), 403
-
-
-# ---------------------------------------------------------------
-# Datenbank
-# Neuer Dateiname, damit die alte site.db (Destination) nicht stört
-# ---------------------------------------------------------------
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///buchungen.db"
-db = SQLAlchemy(app)
-
-
-class Kunde(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(50), nullable=False)
-    vorname = db.Column(db.String(50), nullable=False)
-    email = db.Column(db.String(100), nullable=False, unique=True)
-    adresse = db.Column(db.String(100), nullable=False)
-    hausnummer = db.Column(db.String(10), nullable=False)
-    plz = db.Column(db.String(5), nullable=False)
-    ort = db.Column(db.String(50), nullable=False)
-    telefonnummer = db.Column(db.String(30), nullable=False)
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "name": self.name,
-            "vorname": self.vorname,
-            "email": self.email,
-            "adresse": self.adresse,
-            "hausnummer": self.hausnummer,
-            "plz": self.plz,
-            "ort": self.ort,
-            "telefonnummer": self.telefonnummer,
-        }
-
-
-class Paket(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    paket = db.Column(db.String(30), nullable=False, unique=True)  # Gold, Silber, Bronze
-    preis = db.Column(db.Integer, nullable=False)                  # 55, 25, 15
-
-    def to_dict(self):
-        return {"id": self.id, "paket": self.paket, "preis": self.preis}
-
-
-class Autoart(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    autoart = db.Column(db.String(30), nullable=False, unique=True)
-    aufschlag = db.Column(db.Integer, nullable=False)
-
-    def to_dict(self):
-        return {"id": self.id, "autoart": self.autoart, "aufschlag": self.aufschlag}
-
-
-class Buchung(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    kundenid = db.Column(db.Integer, db.ForeignKey("kunde.id"), nullable=False)
-    paketid = db.Column(db.Integer, db.ForeignKey("paket.id"), nullable=False)
-    autoid = db.Column(db.Integer, db.ForeignKey("autoart.id"), nullable=False)
-    status = db.Column(db.String(20), nullable=False, default="offen")
-    datum = db.Column(db.Date, nullable=False)
-    erstellungsdatum = db.Column(db.Date, nullable=False, default=date.today)
-    uhrzeit = db.Column(db.Time, nullable=False)
-
-    kunde = db.relationship("Kunde")
-    paket = db.relationship("Paket")
-    auto = db.relationship("Autoart")
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "kundenid": self.kundenid,
-            "paketid": self.paketid,
-            "autoid": self.autoid,
-            "status": self.status,
-            "datum": self.datum.isoformat(),
-            "erstellungsdatum": self.erstellungsdatum.isoformat(),
-            "uhrzeit": self.uhrzeit.strftime("%H:%M"),
-            # berechnet, nicht gespeichert (sonst wäre es eine Redundanz)
-            "gesamtpreis": self.paket.preis + self.auto.aufschlag,
-        }
-
-
-def seed():
-    """Füllt Paket und Autoart beim ersten Start."""
-    if Paket.query.count() == 0:
-        db.session.add_all([
-            Paket(paket="Gold", preis=55),
-            Paket(paket="Silber", preis=25),
-            Paket(paket="Bronze", preis=15),
-        ])
-    if Autoart.query.count() == 0:
-        db.session.add_all([
-            Autoart(autoart="Kompaktwagen", aufschlag=0),
-            Autoart(autoart="Kombiwagen", aufschlag=5),
-            Autoart(autoart="Limousine", aufschlag=10),
-            Autoart(autoart="SUV", aufschlag=10),
-            Autoart(autoart="Van", aufschlag=15),
-        ])
-    db.session.commit()
-
-
-with app.app_context():
-    db.create_all()
-    seed()
-
-
-# ---------------------------------------------------------------
-# Routen
-# ---------------------------------------------------------------
-@app.route("/")
-def home():
-    return jsonify({"message": "Willkommen bei der Buchungs-API!"})
-
-
-# ---- Pakete und Autoarten (nur lesen) ----
-@app.route("/pakete", methods=["GET"])
-def get_pakete():
-    return jsonify([p.to_dict() for p in Paket.query.all()])
-
-
-@app.route("/autoarten", methods=["GET"])
-def get_autoarten():
-    return jsonify([a.to_dict() for a in Autoart.query.all()])
-
-
-# ---- Kunden ----
-@app.route("/kunden", methods=["GET"])
-def get_kunden():
-    return jsonify([k.to_dict() for k in Kunde.query.all()])
-
-
-@app.route("/kunden/<int:kunden_id>", methods=["GET"])
-def get_kunde(kunden_id):
-    kunde = db.session.get(Kunde, kunden_id)
-    if not kunde:
-        return jsonify({"error": "Kunde nicht gefunden"}), 404
-    return jsonify(kunde.to_dict())
-
-
-@app.route("/kunden", methods=["POST"])
-def add_kunde():
-    data = request.get_json()
-    try:
-        kunde = Kunde(
-            name=data["name"],
-            vorname=data["vorname"],
-            email=data["email"],
-            adresse=data["adresse"],
-            hausnummer=data["hausnummer"],
-            plz=data["plz"],
-            ort=data["ort"],
-            telefonnummer=data["telefonnummer"],
-        )
-    except (KeyError, TypeError):
-        return jsonify({"error": "Pflichtfeld fehlt"}), 400
-    if Kunde.query.filter_by(email=kunde.email).first():
-        return jsonify({"error": "E-Mail existiert bereits"}), 409
-    db.session.add(kunde)
-    db.session.commit()
-    return jsonify(kunde.to_dict()), 201
-
-
-@app.route("/kunden/<int:kunden_id>", methods=["PUT"])
-def update_kunde(kunden_id):
-    kunde = db.session.get(Kunde, kunden_id)
-    if not kunde:
-        return jsonify({"error": "Kunde nicht gefunden"}), 404
-    data = request.get_json() or {}
-    for feld in ("name", "vorname", "email", "adresse", "hausnummer",
-                 "plz", "ort", "telefonnummer"):
-        setattr(kunde, feld, data.get(feld, getattr(kunde, feld)))
-    db.session.commit()
-    return jsonify(kunde.to_dict())
-
-
-@app.route("/kunden/<int:kunden_id>", methods=["DELETE"])
-def delete_kunde(kunden_id):
-    kunde = db.session.get(Kunde, kunden_id)
-    if not kunde:
-        return jsonify({"error": "Kunde nicht gefunden"}), 404x
-    if Buchung.query.filter_by(kundenid=kunden_id).first():
-        return jsonify({"error": "Kunde hat noch Buchungen"}), 409
-    db.session.delete(kunde)
-    db.session.commit()
-    return jsonify({"message": "Kunde gelöscht"})
-
-
-# ---- Buchungen ----
-@app.route("/buchungen", methods=["GET"])
-def get_buchungen():
-    return jsonify([b.to_dict() for b in Buchung.query.all()])
-
-
-@app.route("/buchungen/<int:buchung_id>", methods=["GET"])
-def get_buchung(buchung_id):
-    buchung = db.session.get(Buchung, buchung_id)
-    if not buchung:
-        return jsonify({"error": "Buchung nicht gefunden"}), 404
-    return jsonify(buchung.to_dict())
-
-
-@app.route("/buchungen", methods=["POST"])
-def add_buchung():
-    data = request.get_json() or {}
-    try:
-        kundenid = data["kundenid"]
-        paketid = data["paketid"]
-        autoid = data["autoid"]
-        datum = date.fromisoformat(data["datum"])          # "2026-10-15"
-        uhrzeit = time.fromisoformat(data["uhrzeit"])      # "10:00"
-    except (KeyError, ValueError, TypeError):
-        return jsonify({"error": "Pflichtfeld fehlt oder Format falsch "
-                                 "(datum: YYYY-MM-DD, uhrzeit: HH:MM)"}), 400
-
-    if not (db.session.get(Kunde, kundenid)
-            and db.session.get(Paket, paketid)
-            and db.session.get(Autoart, autoid)):
-        return jsonify({"error": "kundenid, paketid oder autoid existiert nicht"}), 400
-
-    buchung = Buchung(
-        kundenid=kundenid,
-        paketid=paketid,
-        autoid=autoid,
-        status=data.get("status", "offen"),
-        datum=datum,
-        uhrzeit=uhrzeit,
-        # erstellungsdatum wird automatisch auf heute gesetzt
-    )
-    db.session.add(buchung)
-    db.session.commit()
-    return jsonify(buchung.to_dict()), 201
-
-
-@app.route("/buchungen/<int:buchung_id>", methods=["PUT"])
-def update_buchung(buchung_id):
-    buchung = db.session.get(Buchung, buchung_id)
-    if not buchung:
-        return jsonify({"error": "Buchung nicht gefunden"}), 404
-    data = request.get_json() or {}
-    try:
-        if "datum" in data:
-            buchung.datum = date.fromisoformat(data["datum"])
-        if "uhrzeit" in data:
-            buchung.uhrzeit = time.fromisoformat(data["uhrzeit"])
-    except ValueError:
-        return jsonify({"error": "Datum/Uhrzeit-Format falsch"}), 400
-    buchung.status = data.get("status", buchung.status)
-    buchung.kundenid = data.get("kundenid", buchung.kundenid)
-    buchung.paketid = data.get("paketid", buchung.paketid)
-    buchung.autoid = data.get("autoid", buchung.autoid)
-    db.session.commit()
-    return jsonify(buchung.to_dict())
-
-
-@app.route("/buchungen/<int:buchung_id>", methods=["DELETE"])
-def delete_buchung(buchung_id):
-    buchung = db.session.get(Buchung, buchung_id)
-    if not buchung:
-        return jsonify({"error": "Buchung nicht gefunden"}), 404
-    db.session.delete(buchung)
-    db.session.commit()
-    return jsonify({"message": "Buchung gelöscht"})
-
-
-if __name__ == "__main__":
-    app.run(debug=True)'''
-
-
 import os
 import secrets
 import sqlite3
@@ -304,9 +12,30 @@ app.json.sort_keys = False
 app.config["JSON_SORT_KEYS"] = False
 
 # ---------------------------------------------------------------
-# API-Key-Schutz
+# Zugriff: zwei feste API-Keys, beim Start per export gesetzt
+#
+#   export ADMIN_KEY="glzy9iTuc9EfLnX96ql6mLa3xo9NQVeOCgV5Zu7J-G4"    -> Admin: darf ALLES
+#   export KUNDEN_KEY="-9cePCbbprr6rtAEOYxNWg8cLp691ELsIjTGpUBNvog"   -> Kunde: darf nur
+#       - Pakete und Autoarten ansehen (nicht bearbeiten)
+#       - seine EIGENEN Buchungen ansehen, anlegen, stornieren, löschen
+
+#    python3.12 -c "import secrets; print(secrets.token_urlsafe(32))"
+#
+# Beide schicken den Header X-API-Key.
+# Weil alle Kunden denselben Key haben, sagt der Kunde zusätzlich mit dem
+# Header X-Kunden-Email, wer er ist. Neue Kunden registrieren sich selbst
+# mit POST /registrieren (dafür braucht man nur den KUNDEN_KEY).
 # ---------------------------------------------------------------
-API_KEY = os.environ.get("API_KEY")
+ADMIN_KEY = os.environ.get("ADMIN_KEY")
+#glzy9iTuc9EfLnX96ql6mLa3xo9NQVeOCgV5Zu7J-G4
+KUNDEN_KEY = os.environ.get("KUNDEN_KEY")
+#-9cePCbbprr6rtAEOYxNWg8cLp691ELsIjTGpUBNvog
+
+STATUS_WERTE = ("offen", "bestätigt", "storniert", "abgeschlossen")
+
+
+def key_passt(key, erwartet):
+    return bool(erwartet) and secrets.compare_digest(key.encode(), erwartet.encode())
 
 
 @app.before_request
@@ -314,8 +43,44 @@ def check_api_key():
     key = request.headers.get("X-API-Key")
     if not key:
         return jsonify({"error": "API key fehlt"}), 401
-    if not API_KEY or not secrets.compare_digest(key, API_KEY):
+
+    if key_passt(key, ADMIN_KEY):
+        g.rolle = "admin"
+        g.kundenid = None
+        return
+
+    if not key_passt(key, KUNDEN_KEY):
         return jsonify({"error": "API key ungültig"}), 403
+
+    # Kunden-Key: wer genau ist es?
+    g.rolle = "kunde"
+    g.kundenid = None
+    if request.endpoint == "registrieren":
+        return  # ein neuer Kunde hat noch keine E-Mail im System
+
+    email = request.headers.get("X-Kunden-Email", "").strip().lower()
+    if not email:
+        return jsonify({"error": "Header X-Kunden-Email fehlt"}), 401
+    kunde = get_db().execute(
+        "SELECT id FROM kunde WHERE lower(email) = ?", (email,)
+    ).fetchone()
+    if kunde is None:
+        return jsonify({"error": "Kunde nicht gefunden. Erst registrieren: POST /registrieren"}), 403
+    g.kundenid = kunde["id"]
+
+
+def nur_admin():
+    """Gibt eine Fehlerantwort zurück, wenn der Aufrufer kein Admin ist."""
+    if g.rolle != "admin":
+        return jsonify({"error": "Nur für Admins erlaubt"}), 403
+
+
+def eigener_kunde(kunden_id):
+    return g.rolle == "admin" or g.kundenid == kunden_id
+
+
+def ganze_zahl(wert):
+    return isinstance(wert, int) and not isinstance(wert, bool) and wert >= 0
 
 
 # ---------------------------------------------------------------
@@ -382,6 +147,9 @@ BUCHUNG_SELECT = """
     JOIN autoart a ON b.autoid  = a.id
 """
 
+KUNDE_SELECT = ("SELECT id, name, vorname, email, adresse, hausnummer, "
+                "plz, ort, telefonnummer FROM kunde")
+
 KUNDE_FELDER = ("name", "vorname", "email", "adresse",
                 "hausnummer", "plz", "ort", "telefonnummer")
 
@@ -408,6 +176,51 @@ def close_db(error):
         con.close()
 
 
+def json_dict():
+    """Der JSON-Body als Dictionary (leer, wenn keiner oder ungültig)."""
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+
+def buchung_laden(con, buchung_id):
+    """Holt eine Buchung. Ein Kunde bekommt nur seine eigenen (sonst None)."""
+    row = con.execute("SELECT * FROM buchung WHERE id = ?", (buchung_id,)).fetchone()
+    if row is None:
+        return None
+    if g.rolle == "kunde" and row["kundenid"] != g.kundenid:
+        return None
+    return row
+
+
+def kunde_anlegen(data):
+    """Legt einen Kunden an (für POST /kunden und POST /registrieren)."""
+    if not all(f in data for f in KUNDE_FELDER):
+        return jsonify({"error": "Pflichtfeld fehlt"}), 400
+    if not all(isinstance(data[f], str) and data[f].strip() for f in KUNDE_FELDER):
+        return jsonify({"error": "Alle Felder müssen ausgefüllter Text sein"}), 400
+
+    werte = {f: data[f].strip() for f in KUNDE_FELDER}
+    if "@" not in werte["email"]:
+        return jsonify({"error": "E-Mail ungültig"}), 400
+    werte["email"] = werte["email"].lower()   # damit a@b.de und A@b.de gleich sind
+
+    con = get_db()
+    try:
+        cur = con.execute(
+            """INSERT INTO kunde
+               (name, vorname, email, adresse, hausnummer, plz, ort, telefonnummer)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            [werte[f] for f in KUNDE_FELDER],
+        )
+        con.commit()
+    except sqlite3.IntegrityError:
+        # UNIQUE auf email wurde verletzt
+        return jsonify({"error": "E-Mail existiert bereits"}), 409
+
+    row = con.execute(KUNDE_SELECT + " WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return jsonify(dict(row)), 201
+
+
 init_db()
 
 
@@ -419,30 +232,162 @@ def home():
     return jsonify({"message": "Willkommen bei der Detailing-Factory-API!"})
 
 
-# ---- Pakete und Autoarten ----
+# ---- Registrierung: Kunden legen sich selbst an ----
+@app.route("/registrieren", methods=["POST"])
+def registrieren():
+    return kunde_anlegen(json_dict())
+
+
+# ---- Pakete: ansehen darf jeder, bearbeiten nur der Admin ----
 @app.route("/pakete", methods=["GET"])
 def get_pakete():
     rows = get_db().execute("SELECT * FROM paket").fetchall()
     return jsonify([dict(r) for r in rows])
 
 
+@app.route("/pakete", methods=["POST"])
+def add_paket():
+    fehler = nur_admin()
+    if fehler:
+        return fehler
+    data = json_dict()
+    name, preis = data.get("paket"), data.get("preis")
+    if not (isinstance(name, str) and name.strip() and ganze_zahl(preis)):
+        return jsonify({"error": "paket (Text) und preis (ganze Zahl >= 0) nötig"}), 400
+    con = get_db()
+    try:
+        cur = con.execute("INSERT INTO paket (paket, preis) VALUES (?, ?)", (name.strip(), preis))
+        con.commit()
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Paket gibt es schon"}), 409
+    row = con.execute("SELECT * FROM paket WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return jsonify(dict(row)), 201
+
+
+@app.route("/pakete/<int:paket_id>", methods=["PUT"])
+def update_paket(paket_id):
+    fehler = nur_admin()
+    if fehler:
+        return fehler
+    con = get_db()
+    alt = con.execute("SELECT * FROM paket WHERE id = ?", (paket_id,)).fetchone()
+    if alt is None:
+        return jsonify({"error": "Paket nicht gefunden"}), 404
+    data = json_dict()
+    name = data.get("paket", alt["paket"])
+    preis = data.get("preis", alt["preis"])
+    if not (isinstance(name, str) and name.strip() and ganze_zahl(preis)):
+        return jsonify({"error": "paket (Text) und preis (ganze Zahl >= 0) nötig"}), 400
+    try:
+        con.execute("UPDATE paket SET paket = ?, preis = ? WHERE id = ?",
+                    (name.strip(), preis, paket_id))
+        con.commit()
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Paket gibt es schon"}), 409
+    row = con.execute("SELECT * FROM paket WHERE id = ?", (paket_id,)).fetchone()
+    return jsonify(dict(row))
+
+
+@app.route("/pakete/<int:paket_id>", methods=["DELETE"])
+def delete_paket(paket_id):
+    fehler = nur_admin()
+    if fehler:
+        return fehler
+    con = get_db()
+    try:
+        cur = con.execute("DELETE FROM paket WHERE id = ?", (paket_id,))
+        con.commit()
+    except sqlite3.IntegrityError:
+        # FOREIGN KEY: das Paket steckt noch in Buchungen
+        return jsonify({"error": "Paket wird noch in Buchungen benutzt"}), 409
+    if cur.rowcount == 0:
+        return jsonify({"error": "Paket nicht gefunden"}), 404
+    return jsonify({"message": "Paket gelöscht"})
+
+
+# ---- Autoarten: ansehen darf jeder, bearbeiten nur der Admin ----
 @app.route("/autoarten", methods=["GET"])
 def get_autoarten():
     rows = get_db().execute("SELECT * FROM autoart").fetchall()
     return jsonify([dict(r) for r in rows])
 
 
+@app.route("/autoarten", methods=["POST"])
+def add_autoart():
+    fehler = nur_admin()
+    if fehler:
+        return fehler
+    data = json_dict()
+    name, aufschlag = data.get("autoart"), data.get("aufschlag")
+    if not (isinstance(name, str) and name.strip() and ganze_zahl(aufschlag)):
+        return jsonify({"error": "autoart (Text) und aufschlag (ganze Zahl >= 0) nötig"}), 400
+    con = get_db()
+    try:
+        cur = con.execute("INSERT INTO autoart (autoart, aufschlag) VALUES (?, ?)",
+                          (name.strip(), aufschlag))
+        con.commit()
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Autoart gibt es schon"}), 409
+    row = con.execute("SELECT * FROM autoart WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return jsonify(dict(row)), 201
+
+
+@app.route("/autoarten/<int:auto_id>", methods=["PUT"])
+def update_autoart(auto_id):
+    fehler = nur_admin()
+    if fehler:
+        return fehler
+    con = get_db()
+    alt = con.execute("SELECT * FROM autoart WHERE id = ?", (auto_id,)).fetchone()
+    if alt is None:
+        return jsonify({"error": "Autoart nicht gefunden"}), 404
+    data = json_dict()
+    name = data.get("autoart", alt["autoart"])
+    aufschlag = data.get("aufschlag", alt["aufschlag"])
+    if not (isinstance(name, str) and name.strip() and ganze_zahl(aufschlag)):
+        return jsonify({"error": "autoart (Text) und aufschlag (ganze Zahl >= 0) nötig"}), 400
+    try:
+        con.execute("UPDATE autoart SET autoart = ?, aufschlag = ? WHERE id = ?",
+                    (name.strip(), aufschlag, auto_id))
+        con.commit()
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Autoart gibt es schon"}), 409
+    row = con.execute("SELECT * FROM autoart WHERE id = ?", (auto_id,)).fetchone()
+    return jsonify(dict(row))
+
+
+@app.route("/autoarten/<int:auto_id>", methods=["DELETE"])
+def delete_autoart(auto_id):
+    fehler = nur_admin()
+    if fehler:
+        return fehler
+    con = get_db()
+    try:
+        cur = con.execute("DELETE FROM autoart WHERE id = ?", (auto_id,))
+        con.commit()
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Autoart wird noch in Buchungen benutzt"}), 409
+    if cur.rowcount == 0:
+        return jsonify({"error": "Autoart nicht gefunden"}), 404
+    return jsonify({"message": "Autoart gelöscht"})
+
+
 # ---- Kunden ----
 @app.route("/kunden", methods=["GET"])
 def get_kunden():
-    rows = get_db().execute("SELECT * FROM kunde").fetchall()
+    fehler = nur_admin()
+    if fehler:
+        return fehler
+    rows = get_db().execute(KUNDE_SELECT).fetchall()
     return jsonify([dict(r) for r in rows])
 
 
 @app.route("/kunden/<int:kunden_id>", methods=["GET"])
 def get_kunde(kunden_id):
+    if not eigener_kunde(kunden_id):
+        return jsonify({"error": "Kein Zugriff auf andere Kunden"}), 403
     row = get_db().execute(
-        "SELECT * FROM kunde WHERE id = ?", (kunden_id,)
+        KUNDE_SELECT + " WHERE id = ?", (kunden_id,)
     ).fetchone()
     if row is None:
         return jsonify({"error": "Kunde nicht gefunden"}), 404
@@ -451,35 +396,25 @@ def get_kunde(kunden_id):
 
 @app.route("/kunden", methods=["POST"])
 def add_kunde():
-    data = request.get_json() or {}
-    if not all(f in data for f in KUNDE_FELDER):
-        return jsonify({"error": "Pflichtfeld fehlt"}), 400
-
-    con = get_db()
-    try:
-        cur = con.execute(
-            """INSERT INTO kunde
-               (name, vorname, email, adresse, hausnummer, plz, ort, telefonnummer)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            [data[f] for f in KUNDE_FELDER],
-        )
-        con.commit()
-    except sqlite3.IntegrityError:
-        # UNIQUE auf email wurde verletzt
-        return jsonify({"error": "E-Mail existiert bereits"}), 409
-
-    row = con.execute("SELECT * FROM kunde WHERE id = ?", (cur.lastrowid,)).fetchone()
-    return jsonify(dict(row)), 201
+    fehler = nur_admin()
+    if fehler:
+        return fehler
+    return kunde_anlegen(json_dict())
 
 
 @app.route("/kunden/<int:kunden_id>", methods=["PUT"])
 def update_kunde(kunden_id):
+    fehler = nur_admin()
+    if fehler:
+        return fehler
     con = get_db()
-    alt = con.execute("SELECT * FROM kunde WHERE id = ?", (kunden_id,)).fetchone()
+    alt = con.execute(KUNDE_SELECT + " WHERE id = ?", (kunden_id,)).fetchone()
     if alt is None:
         return jsonify({"error": "Kunde nicht gefunden"}), 404
 
-    data = request.get_json() or {}
+    data = json_dict()
+    if isinstance(data.get("email"), str):
+        data["email"] = data["email"].strip().lower()
     neu = [data.get(f, alt[f]) for f in KUNDE_FELDER]   # neuer Wert oder alter
     try:
         con.execute(
@@ -493,12 +428,15 @@ def update_kunde(kunden_id):
     except sqlite3.IntegrityError:
         return jsonify({"error": "E-Mail existiert bereits"}), 409
 
-    row = con.execute("SELECT * FROM kunde WHERE id = ?", (kunden_id,)).fetchone()
+    row = con.execute(KUNDE_SELECT + " WHERE id = ?", (kunden_id,)).fetchone()
     return jsonify(dict(row))
 
 
 @app.route("/kunden/<int:kunden_id>", methods=["DELETE"])
 def delete_kunde(kunden_id):
+    fehler = nur_admin()
+    if fehler:
+        return fehler
     con = get_db()
     try:
         cur = con.execute("DELETE FROM kunde WHERE id = ?", (kunden_id,))
@@ -514,7 +452,14 @@ def delete_kunde(kunden_id):
 # ---- Buchungen ----
 @app.route("/detailing_factory", methods=["GET"])
 def get_buchungen():
-    rows = get_db().execute(BUCHUNG_SELECT + " ORDER BY b.id").fetchall()
+    con = get_db()
+    if g.rolle == "admin":
+        rows = con.execute(BUCHUNG_SELECT + " ORDER BY b.id").fetchall()
+    else:
+        # Kunde sieht nur seine eigenen Buchungen
+        rows = con.execute(
+            BUCHUNG_SELECT + " WHERE b.kundenid = ? ORDER BY b.id", (g.kundenid,)
+        ).fetchall()
     return jsonify([dict(r) for r in rows])
 
 
@@ -523,16 +468,27 @@ def get_buchung(buchung_id):
     row = get_db().execute(
         BUCHUNG_SELECT + " WHERE b.id = ?", (buchung_id,)
     ).fetchone()
-    if row is None:
+    if row is None or (g.rolle == "kunde" and row["kundenid"] != g.kundenid):
         return jsonify({"error": "Buchung nicht gefunden"}), 404
     return jsonify(dict(row))
 
 
 @app.route("/detailing_factory", methods=["POST"])
 def add_buchung():
-    data = request.get_json() or {}
+    data = json_dict()
+
+    if g.rolle == "kunde":
+        # Ein Kunde bucht nur für sich selbst und setzt den Status nicht
+        if data.get("kundenid", g.kundenid) != g.kundenid:
+            return jsonify({"error": "Du kannst nur für dich selbst buchen"}), 403
+        status = None
+    else:
+        status = data.get("status")
+        if status is not None and status not in STATUS_WERTE:
+            return jsonify({"error": f"status muss einer von {STATUS_WERTE} sein"}), 400
+
     try:
-        kundenid = data["kundenid"]
+        kundenid = g.kundenid if g.rolle == "kunde" else data["kundenid"]
         paketid = data["paketid"]
         autoid = data["autoid"]
         datum = date.fromisoformat(data["datum"]).isoformat()          # 2026-10-15
@@ -547,7 +503,7 @@ def add_buchung():
         cur = con.execute(
             """INSERT INTO buchung (kundenid, paketid, autoid, status, datum, uhrzeit)
                VALUES (?, ?, ?, COALESCE(?, 'offen'), ?, ?)""",
-            (kundenid, paketid, autoid, data.get("status"), datum, uhrzeit),
+            (kundenid, paketid, autoid, status, datum, uhrzeit),
         )
         con.commit()
     except sqlite3.IntegrityError:
@@ -561,11 +517,21 @@ def add_buchung():
 @app.route("/detailing_factory/<int:buchung_id>", methods=["PUT"])
 def update_buchung(buchung_id):
     con = get_db()
-    alt = con.execute("SELECT * FROM buchung WHERE id = ?", (buchung_id,)).fetchone()
+    alt = buchung_laden(con, buchung_id)
     if alt is None:
         return jsonify({"error": "Buchung nicht gefunden"}), 404
 
-    data = request.get_json() or {}
+    data = json_dict()
+
+    if g.rolle == "kunde":
+        # Kunde darf nur stornieren, sonst nichts ändern
+        if set(data) - {"status"} or data.get("status") != "storniert":
+            return jsonify({"error": 'Kunden dürfen nur stornieren: {"status": "storniert"}'}), 403
+        if alt["status"] == "abgeschlossen":
+            return jsonify({"error": "Abgeschlossene Buchungen können nicht storniert werden"}), 409
+    elif "status" in data and data["status"] not in STATUS_WERTE:
+        return jsonify({"error": f"status muss einer von {STATUS_WERTE} sein"}), 400
+
     try:
         datum = date.fromisoformat(data["datum"]).isoformat() if "datum" in data else alt["datum"]
         uhrzeit = (time.fromisoformat(data["uhrzeit"]).strftime("%H:%M")
@@ -593,15 +559,61 @@ def update_buchung(buchung_id):
     return jsonify(dict(row))
 
 
+@app.route("/detailing_factory/<int:buchung_id>/stornieren", methods=["POST"])
+def storniere_buchung(buchung_id):
+    """Abkürzung zum Stornieren (Kunde und Admin)."""
+    con = get_db()
+    alt = buchung_laden(con, buchung_id)
+    if alt is None:
+        return jsonify({"error": "Buchung nicht gefunden"}), 404
+    if alt["status"] == "storniert":
+        return jsonify({"error": "Buchung ist schon storniert"}), 409
+    if g.rolle == "kunde" and alt["status"] == "abgeschlossen":
+        return jsonify({"error": "Abgeschlossene Buchungen können nicht storniert werden"}), 409
+
+    con.execute("UPDATE buchung SET status = 'storniert' WHERE id = ?", (buchung_id,))
+    con.commit()
+    row = con.execute(BUCHUNG_SELECT + " WHERE b.id = ?", (buchung_id,)).fetchone()
+    return jsonify(dict(row))
+
+
 @app.route("/detailing_factory/<int:buchung_id>", methods=["DELETE"])
 def delete_buchung(buchung_id):
     con = get_db()
-    cur = con.execute("DELETE FROM buchung WHERE id = ?", (buchung_id,))
-    con.commit()
-    if cur.rowcount == 0:
+    alt = buchung_laden(con, buchung_id)
+    if alt is None:
         return jsonify({"error": "Buchung nicht gefunden"}), 404
+    if g.rolle == "kunde" and alt["status"] == "abgeschlossen":
+        return jsonify({"error": "Abgeschlossene Buchungen können nicht gelöscht werden"}), 409
+
+    con.execute("DELETE FROM buchung WHERE id = ?", (buchung_id,))
+    con.commit()
     return jsonify({"message": "Buchung gelöscht"})
 
 
 if __name__ == "__main__":
     app.run(debug=True)
+
+
+'''{
+  "paketid": 1,
+  "autoid": 4,
+  "datum": "2026-10-15",
+  "uhrzeit": "13:10"
+}
+
+POST http://127.0.0.1:5000/detailing_factory/1/stornieren, ohne Body.
+ ODER
+{
+  "status": "storniert"
+}
+
+
+FÜR ADMIN:
+
+Gültige Werte: offen, bestätigt, storniert, abgeschlossen
+
+{
+  "status": "bestätigt"
+}
+'''
