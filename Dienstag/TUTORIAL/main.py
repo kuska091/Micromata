@@ -1,9 +1,11 @@
 import os
 import secrets
 import sqlite3
-from datetime import date, time
+from datetime import date, datetime, time, timedelta, timezone
 
-from flask import Flask, g, jsonify, request
+import jwt                                   # pip install pyjwt
+from flask import Flask, g, jsonify, redirect, request, send_from_directory
+from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
 
@@ -12,61 +14,102 @@ app.json.sort_keys = False
 app.config["JSON_SORT_KEYS"] = False
 
 # ---------------------------------------------------------------
-# Zugriff: zwei feste API-Keys, beim Start per export gesetzt
+# Anmeldung mit JWT (Bearer Token)
 #
-#   export ADMIN_KEY="glzy9iTuc9EfLnX96ql6mLa3xo9NQVeOCgV5Zu7J-G4"    -> Admin: darf ALLES
-#   export KUNDEN_KEY="-9cePCbbprr6rtAEOYxNWg8cLp691ELsIjTGpUBNvog"   -> Kunde: darf nur
-#       - Pakete und Autoarten ansehen (nicht bearbeiten)
-#       - seine EIGENEN Buchungen ansehen, anlegen, stornieren, löschen
-
-#    python3.12 -c "import secrets; print(secrets.token_urlsafe(32))"
+# Einmal im Terminal setzen, bevor der Server startet:
+#   export JWT_SECRET="..."          geheimer Schlüssel, signiert die Tokens
+#   export ADMIN_EMAIL="admin@detailing-factory.de"
+#   export ADMIN_PASSWORD="..."
+#   (Secret erzeugen: python -c "import secrets; print(secrets.token_urlsafe(32))")
 #
-# Beide schicken den Header X-API-Key.
-# Weil alle Kunden denselben Key haben, sagt der Kunde zusätzlich mit dem
-# Header X-Kunden-Email, wer er ist. Neue Kunden registrieren sich selbst
-# mit POST /registrieren (dafür braucht man nur den KUNDEN_KEY).
+# Ablauf:
+#   POST /register  -> Kunde legt sich an (name, email, passwort, ...)
+#   POST /login     -> Antwort enthält den access_token (JWT)
+#   alle anderen Routen brauchen den Header:
+#       Authorization: Bearer <access_token>
+#
+# Kunde: Pakete/Autoarten ansehen, nur EIGENE Buchungen ansehen/anlegen/
+#        stornieren/löschen. Admin (Login mit ADMIN_EMAIL): darf alles.
 # ---------------------------------------------------------------
-ADMIN_KEY = os.environ.get("ADMIN_KEY")
-#glzy9iTuc9EfLnX96ql6mLa3xo9NQVeOCgV5Zu7J-G4
-KUNDEN_KEY = os.environ.get("KUNDEN_KEY")
-#-9cePCbbprr6rtAEOYxNWg8cLp691ELsIjTGpUBNvog
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
+if len(JWT_SECRET) < 32:
+    raise RuntimeError(
+        "JWT_SECRET fehlt oder ist zu kurz (mind. 32 Zeichen). Erzeugen mit: "
+        'python -c "import secrets; print(secrets.token_urlsafe(32))"  '
+        'und dann: export JWT_SECRET="..."'
+    )
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "").strip().lower()
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 
+TOKEN_STUNDEN = 1          # so lange ist ein Token gültig
+MIN_PASSWORT = 8
 STATUS_WERTE = ("offen", "bestätigt", "storniert", "abgeschlossen")
 
+# Für Logins mit unbekannter E-Mail: gleich lange Prüfzeit wie bei echten Konten
+DUMMY_HASH = generate_password_hash("dummy-passwort")
 
-def key_passt(key, erwartet):
-    return bool(erwartet) and secrets.compare_digest(key.encode(), erwartet.encode())
+# Diese Routen brauchen kein Token
+OEFFENTLICH = {"home", "register", "login", "webseite"}
+
+
+def gleich(a, b):
+    return secrets.compare_digest(a.encode(), b.encode())
+
+
+def token_erzeugen(rolle, kundenid, name, email):
+    """Erstellt ein JWT. Das Passwort steht nie im Token."""
+    jetzt = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(kundenid) if kundenid is not None else "admin",
+        "role": rolle,
+        "name": name,
+        "email": email,
+        "jti": secrets.token_hex(16),     # eindeutige Token-Nummer (für /logout)
+        "iat": jetzt,
+        "exp": jetzt + timedelta(hours=TOKEN_STUNDEN),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
 @app.before_request
-def check_api_key():
-    key = request.headers.get("X-API-Key")
-    if not key:
-        return jsonify({"error": "API key fehlt"}), 401
-
-    if key_passt(key, ADMIN_KEY):
-        g.rolle = "admin"
-        g.kundenid = None
+def check_token():
+    if request.endpoint is None or request.endpoint in OEFFENTLICH:
         return
 
-    if not key_passt(key, KUNDEN_KEY):
-        return jsonify({"error": "API key ungültig"}), 403
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return jsonify({"error": "Missing Bearer token. Please login: POST /login"}), 401
 
-    # Kunden-Key: wer genau ist es?
-    g.rolle = "kunde"
+    try:
+        daten = jwt.decode(auth[7:].strip(), JWT_SECRET, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token expired, please login again"}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "Invalid token"}), 401
+
+    jti = daten.get("jti")
+    if not jti:
+        return jsonify({"error": "Invalid token"}), 401
+    if get_db().execute("SELECT 1 FROM gesperrter_token WHERE jti = ?", (jti,)).fetchone():
+        return jsonify({"error": "Token was logged out, please login again"}), 401
+    g.jti = jti
+    g.token_ablauf = daten["exp"]
+
+    g.rolle = daten.get("role")
     g.kundenid = None
-    if request.endpoint == "registrieren":
-        return  # ein neuer Kunde hat noch keine E-Mail im System
-
-    email = request.headers.get("X-Kunden-Email", "").strip().lower()
-    if not email:
-        return jsonify({"error": "Header X-Kunden-Email fehlt"}), 401
-    kunde = get_db().execute(
-        "SELECT id FROM kunde WHERE lower(email) = ?", (email,)
-    ).fetchone()
-    if kunde is None:
-        return jsonify({"error": "Kunde nicht gefunden. Erst registrieren: POST /registrieren"}), 403
-    g.kundenid = kunde["id"]
+    if g.rolle == "admin":
+        return
+    if g.rolle == "kunde":
+        try:
+            kundenid = int(daten["sub"])
+        except (KeyError, ValueError):
+            return jsonify({"error": "Invalid token"}), 401
+        # Gibt es den Kunden noch? (z. B. vom Admin gelöscht)
+        if get_db().execute("SELECT 1 FROM kunde WHERE id = ?", (kundenid,)).fetchone() is None:
+            return jsonify({"error": "Customer no longer exists"}), 401
+        g.kundenid = kundenid
+        return
+    return jsonify({"error": "Invalid token"}), 401
 
 
 def nur_admin():
@@ -98,7 +141,8 @@ CREATE TABLE IF NOT EXISTS kunde (
     hausnummer     VARCHAR(10)  NOT NULL,
     plz            VARCHAR(5)   NOT NULL,
     ort            VARCHAR(50)  NOT NULL,
-    telefonnummer  VARCHAR(30)  NOT NULL
+    telefonnummer  VARCHAR(30)  NOT NULL,
+    passwort_hash  VARCHAR(255)
 );
 
 CREATE TABLE IF NOT EXISTS paket (
@@ -127,6 +171,12 @@ CREATE TABLE IF NOT EXISTS buchung (
     FOREIGN KEY (autoid)   REFERENCES autoart (id)
 );
 
+-- Tokens, die per /logout gesperrt wurden (ablauf = Unix-Zeit des Token-Ablaufs)
+CREATE TABLE IF NOT EXISTS gesperrter_token (
+    jti     VARCHAR(32) PRIMARY KEY,
+    ablauf  INTEGER     NOT NULL
+);
+
 -- OR IGNORE: Startdaten werden nur eingetragen, wenn es sie noch nicht gibt
 INSERT OR IGNORE INTO paket (paket, preis) VALUES
     ('Gold', 55), ('Silber', 25), ('Bronze', 15);
@@ -147,8 +197,12 @@ BUCHUNG_SELECT = """
     JOIN autoart a ON b.autoid  = a.id
 """
 
+# Das Passwort wird nie angezeigt: "********" heißt "Passwort ist gesetzt",
+# leer (null) heißt "noch kein Passwort". In der Datenbank steht nur der Hash.
 KUNDE_SELECT = ("SELECT id, name, vorname, email, adresse, hausnummer, "
-                "plz, ort, telefonnummer FROM kunde")
+                "plz, ort, telefonnummer, "
+                "CASE WHEN passwort_hash IS NOT NULL THEN '********' END AS passwort "
+                "FROM kunde")
 
 KUNDE_FELDER = ("name", "vorname", "email", "adresse",
                 "hausnummer", "plz", "ort", "telefonnummer")
@@ -157,6 +211,11 @@ KUNDE_FELDER = ("name", "vorname", "email", "adresse",
 def init_db():
     con = sqlite3.connect(DB_FILE)
     con.executescript(SCHEMA)
+    # Alte Datenbank ohne passwort_hash? Dann Spalte nachträglich hinzufügen.
+    spalten = [r[1] for r in con.execute("PRAGMA table_info(kunde)")]
+    if "passwort_hash" not in spalten:
+        con.execute("ALTER TABLE kunde ADD COLUMN passwort_hash VARCHAR(255)")
+    con.commit()
     con.close()
 
 
@@ -193,11 +252,15 @@ def buchung_laden(con, buchung_id):
 
 
 def kunde_anlegen(data):
-    """Legt einen Kunden an (für POST /kunden und POST /registrieren)."""
-    if not all(f in data for f in KUNDE_FELDER):
-        return jsonify({"error": "Pflichtfeld fehlt"}), 400
+    """Legt einen Kunden an (für POST /register und POST /kunden)."""
+    if not all(f in data for f in KUNDE_FELDER) or "passwort" not in data:
+        return jsonify({"error": "Pflichtfeld fehlt (name, vorname, email, passwort, adresse, "
+                                 "hausnummer, plz, ort, telefonnummer)"}), 400
     if not all(isinstance(data[f], str) and data[f].strip() for f in KUNDE_FELDER):
         return jsonify({"error": "Alle Felder müssen ausgefüllter Text sein"}), 400
+    passwort = data["passwort"]
+    if not isinstance(passwort, str) or len(passwort) < MIN_PASSWORT:
+        return jsonify({"error": f"passwort muss mindestens {MIN_PASSWORT} Zeichen haben"}), 400
 
     werte = {f: data[f].strip() for f in KUNDE_FELDER}
     if "@" not in werte["email"]:
@@ -205,20 +268,26 @@ def kunde_anlegen(data):
     werte["email"] = werte["email"].lower()   # damit a@b.de und A@b.de gleich sind
 
     con = get_db()
+    schon_da = {"error": "Email already exists, please login"}
+    if con.execute("SELECT 1 FROM kunde WHERE lower(email) = ?", (werte["email"],)).fetchone():
+        return jsonify(schon_da), 409
     try:
         cur = con.execute(
             """INSERT INTO kunde
-               (name, vorname, email, adresse, hausnummer, plz, ort, telefonnummer)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            [werte[f] for f in KUNDE_FELDER],
+               (name, vorname, email, adresse, hausnummer, plz, ort,
+                telefonnummer, passwort_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [werte[f] for f in KUNDE_FELDER] + [generate_password_hash(passwort)],
         )
         con.commit()
     except sqlite3.IntegrityError:
         # UNIQUE auf email wurde verletzt
-        return jsonify({"error": "E-Mail existiert bereits"}), 409
+        return jsonify(schon_da), 409
 
     row = con.execute(KUNDE_SELECT + " WHERE id = ?", (cur.lastrowid,)).fetchone()
-    return jsonify(dict(row)), 201
+    antwort = dict(row)
+    antwort["message"] = "Registered. Please login: POST /login"
+    return jsonify(antwort), 201
 
 
 init_db()
@@ -229,13 +298,63 @@ init_db()
 # ---------------------------------------------------------------
 @app.route("/")
 def home():
-    return jsonify({"message": "Willkommen bei der Detailing-Factory-API!"})
+    # Im Browser landet man direkt auf der Webseite
+    return redirect("/app")
 
 
-# ---- Registrierung: Kunden legen sich selbst an ----
-@app.route("/registrieren", methods=["POST"])
-def registrieren():
+# ---- Registrierung und Login (ohne Token erreichbar) ----
+@app.route("/register", methods=["POST"])
+def register():
     return kunde_anlegen(json_dict())
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    data = json_dict()
+    email, passwort = data.get("email"), data.get("passwort")
+    if not (isinstance(email, str) and isinstance(passwort, str)):
+        return jsonify({"error": "email and passwort are required"}), 400
+    email = email.strip().lower()
+    falsch = ({"error": "Invalid email or password"}, 401)
+
+    # Admin-Login (E-Mail und Passwort stehen in den Umgebungsvariablen)
+    if ADMIN_EMAIL and ADMIN_PASSWORD and gleich(email, ADMIN_EMAIL) and gleich(passwort, ADMIN_PASSWORD):
+        token = token_erzeugen("admin", None, "Admin", ADMIN_EMAIL)
+        return jsonify({"access_token": token, "token_type": "Bearer",
+                        "expires_in": TOKEN_STUNDEN * 3600, "role": "admin"})
+
+    kunde = get_db().execute(
+        "SELECT id, name, vorname, email, passwort_hash FROM kunde WHERE lower(email) = ?",
+        (email,),
+    ).fetchone()
+    hat_passwort = kunde is not None and kunde["passwort_hash"]
+    ok = check_password_hash(kunde["passwort_hash"] if hat_passwort else DUMMY_HASH, passwort)
+    if not (hat_passwort and ok):
+        return jsonify(falsch[0]), falsch[1]
+
+    token = token_erzeugen("kunde", kunde["id"], f"{kunde['vorname']} {kunde['name']}", kunde["email"])
+    return jsonify({"access_token": token, "token_type": "Bearer",
+                    "expires_in": TOKEN_STUNDEN * 3600, "role": "kunde"})
+
+
+# ---- Webseite (ohne Token erreichbar, sonst käme man nie zum Login) ----
+@app.route("/app")
+def webseite():
+    ordner = os.path.dirname(os.path.abspath(__file__))
+    return send_from_directory(ordner, "index.html")
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    """Sperrt den Token, mit dem diese Anfrage kommt."""
+    con = get_db()
+    # abgelaufene Einträge aufräumen (solche Tokens sind sowieso ungültig)
+    con.execute("DELETE FROM gesperrter_token WHERE ablauf < ?",
+                (int(datetime.now(timezone.utc).timestamp()),))
+    con.execute("INSERT OR IGNORE INTO gesperrter_token (jti, ablauf) VALUES (?, ?)",
+                (g.jti, g.token_ablauf))
+    con.commit()
+    return jsonify({"message": "Logged out"})
 
 
 # ---- Pakete: ansehen darf jeder, bearbeiten nur der Admin ----
@@ -415,6 +534,9 @@ def update_kunde(kunden_id):
     data = json_dict()
     if isinstance(data.get("email"), str):
         data["email"] = data["email"].strip().lower()
+    if "passwort" in data and not (isinstance(data["passwort"], str)
+                                   and len(data["passwort"]) >= MIN_PASSWORT):
+        return jsonify({"error": f"passwort muss mindestens {MIN_PASSWORT} Zeichen haben"}), 400
     neu = [data.get(f, alt[f]) for f in KUNDE_FELDER]   # neuer Wert oder alter
     try:
         con.execute(
@@ -424,6 +546,9 @@ def update_kunde(kunden_id):
                WHERE id = ?""",
             neu + [kunden_id],
         )
+        if "passwort" in data:                 # Admin setzt ein neues Passwort
+            con.execute("UPDATE kunde SET passwort_hash = ? WHERE id = ?",
+                        (generate_password_hash(data["passwort"]), kunden_id))
         con.commit()
     except sqlite3.IntegrityError:
         return jsonify({"error": "E-Mail existiert bereits"}), 409
@@ -593,27 +718,3 @@ def delete_buchung(buchung_id):
 
 if __name__ == "__main__":
     app.run(debug=True)
-
-
-'''{
-  "paketid": 1,
-  "autoid": 4,
-  "datum": "2026-10-15",
-  "uhrzeit": "13:10"
-}
-
-POST http://127.0.0.1:5000/detailing_factory/1/stornieren, ohne Body.
- ODER
-{
-  "status": "storniert"
-}
-
-
-FÜR ADMIN:
-
-Gültige Werte: offen, bestätigt, storniert, abgeschlossen
-
-{
-  "status": "bestätigt"
-}
-'''

@@ -1,0 +1,8 @@
+Was ich heute gemacht habe:
+-/register & /login mit bearer_token
+-die daten beim register werden automatisch beim informationen von der Kunde übertragen
+-frontend programmiert(html)
+
+to do:
+-eine folie erstellen über welche sachen wir für frontend benutzen können, welche am besten 
+für mich und für meine webseite ist.
