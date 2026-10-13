@@ -6,3 +6,4 @@ Was ich heute gemacht habe:
 to do:
 -eine folie erstellen über welche sachen wir für frontend benutzen können, welche am besten 
 für mich und für meine webseite ist.
+-als admin kann ich die buchungen nd bearbeiten

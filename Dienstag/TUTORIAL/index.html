@@ -82,7 +82,7 @@ td select { padding:4px 8px; width:auto; }
     </div>
 
     <div class="card">
-      <h2>Neue Buchung</h2>
+      <h2 id="buchTitel">Neue Buchung</h2>
       <form id="buchForm">
         <div id="b_kunde_wrap" hidden><label>Kunde</label><select id="b_kunde"></select></div>
         <div class="row">
@@ -93,8 +93,10 @@ td select { padding:4px 8px; width:auto; }
           <div><label>Datum</label><input id="b_datum" type="date" required></div>
           <div><label>Uhrzeit</label><input id="b_uhrzeit" type="time" required></div>
         </div>
+        <p id="belegt" class="sub" style="margin:8px 0 0"></p>
         <p class="preis">Preis: <span id="b_preis">–</span></p>
-        <button class="primary" type="submit">Buchen</button>
+        <button class="primary" id="buchBtn" type="submit">Buchen</button>
+        <button id="abbruchBtn" type="button" style="margin-top:16px" hidden>Abbrechen</button>
       </form>
     </div>
 
@@ -199,6 +201,7 @@ async function zeigeApp() {
   pakete = res[0].data; autos = res[1].data;
   kunden = rolle === "admin" ? res[2].data : [];
   formularFuellen();
+  bearbeitenBeenden();
   ladeBuchungen();
 }
 
@@ -224,15 +227,64 @@ function formularFuellen() {
 $("b_paket").addEventListener("change", preisAnzeigen);
 $("b_auto").addEventListener("change", preisAnzeigen);
 
+let bearbeiteId = null;      // Nummer der Buchung, die gerade geändert wird (sonst null)
+
+// Zeigt, welche Zeiten am gewählten Tag schon vergeben sind
+async function belegtLaden() {
+  const tag = $("b_datum").value, info = $("belegt");
+  if (!tag) { info.textContent = ""; return; }
+  const res = await api(`/belegt?datum=${tag}` + (bearbeiteId ? `&ausser=${bearbeiteId}` : ""));
+  if (!res || res.status !== 200) return;
+  const zeiten = res.data.belegt.map(b => `${b.von}–${b.bis}`);
+  info.textContent = zeiten.length
+    ? `Schon belegt am ${tag.split("-").reverse().join(".")}: ${zeiten.join(", ")} Uhr. Ein Termin dauert ${res.data.dauer_minuten} Minuten.`
+    : "An diesem Tag sind noch alle Zeiten frei.";
+}
+$("b_datum").addEventListener("change", belegtLaden);
+
+function bearbeitenBeenden() {
+  bearbeiteId = null;
+  $("buchForm").reset();
+  $("buchTitel").textContent = "Neue Buchung";
+  $("buchBtn").textContent = "Buchen";
+  $("abbruchBtn").hidden = true;
+  $("b_datum").min = new Date().toISOString().slice(0, 10);
+  $("belegt").textContent = "";
+  preisAnzeigen();
+}
+$("abbruchBtn").addEventListener("click", () => { bearbeitenBeenden(); meldung(""); });
+
+// Füllt das Formular mit einer bestehenden Buchung, damit man sie ändern kann
+function bearbeitenStarten(b) {
+  bearbeiteId = b.buchungsid;
+  $("b_paket").value = b.paketid;
+  $("b_auto").value = b.autoid;
+  $("b_datum").min = "";                 // auch alte Termine dürfen geändert werden
+  $("b_datum").value = b.datum;
+  $("b_uhrzeit").value = b.uhrzeit;
+  if (rolle === "admin") $("b_kunde").value = b.kundenid;
+  $("buchTitel").textContent = `Buchung Nr. ${b.buchungsid} ändern`;
+  $("buchBtn").textContent = "Änderung speichern";
+  $("abbruchBtn").hidden = false;
+  preisAnzeigen(); belegtLaden(); meldung("");
+  $("buchForm").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
 $("buchForm").addEventListener("submit", async e => {
   e.preventDefault();
   const body = { paketid: +$("b_paket").value, autoid: +$("b_auto").value,
                  datum: $("b_datum").value, uhrzeit: $("b_uhrzeit").value };
   if (rolle === "admin") body.kundenid = +$("b_kunde").value;
-  const res = await api("/detailing_factory", "POST", body);
+  const aendern = bearbeiteId !== null;
+  const res = aendern ? await api(`/detailing_factory/${bearbeiteId}`, "PUT", body)
+                      : await api("/detailing_factory", "POST", body);
   if (!res) return;
-  if (res.status !== 201) return meldung(res.data.error || "Buchung fehlgeschlagen.", "fehler");
-  meldung(`Buchung Nr. ${res.data.buchungsid} angelegt (${res.data.preis} €).`, "ok");
+  if (res.status >= 400) {               // z. B. 409: Termin schon vergeben
+    belegtLaden();
+    return meldung(res.data.error || "Speichern fehlgeschlagen.", "fehler");
+  }
+  meldung(`Buchung Nr. ${res.data.buchungsid} ${aendern ? "geändert" : "angelegt"} (${res.data.preis} €).`, "ok");
+  bearbeitenBeenden();
   ladeBuchungen();
 });
 
@@ -289,7 +341,11 @@ async function ladeBuchungen() {
     weg.addEventListener("click", () => {
       if (confirm("Buchung wirklich löschen?")) aktion(`/detailing_factory/${b.buchungsid}`, "DELETE");
     });
-    td.append(storno, " ", weg);
+    const aendern = document.createElement("button");
+    aendern.textContent = "Ändern";
+    aendern.disabled = rolle !== "admin" && ["storniert", "abgeschlossen"].includes(b.status);
+    aendern.addEventListener("click", () => bearbeitenStarten(b));
+    td.append(aendern, " ", storno, " ", weg);
     tr.appendChild(td);
     tbody.appendChild(tr);
   }

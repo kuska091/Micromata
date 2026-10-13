@@ -43,6 +43,7 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 
 TOKEN_STUNDEN = 1          # so lange ist ein Token gültig
 MIN_PASSWORT = 8
+SLOT_MINUTEN = 120         # so lange belegt eine Buchung den Termin (13:30 -> bis 15:30)
 STATUS_WERTE = ("offen", "bestätigt", "storniert", "abgeschlossen")
 
 # Für Logins mit unbekannter E-Mail: gleich lange Prüfzeit wie bei echten Konten
@@ -249,6 +250,28 @@ def buchung_laden(con, buchung_id):
     if g.rolle == "kunde" and row["kundenid"] != g.kundenid:
         return None
     return row
+
+
+def termin_fehler(con, datum, uhrzeit, ausser_id=None):
+    """Prüft, ob der Termin frei ist. Eine Buchung belegt SLOT_MINUTEN ab ihrer Startzeit.
+    Stornierte Buchungen zählen nicht. Gibt eine 409-Antwort zurück, wenn der Termin belegt ist."""
+    start = datetime.fromisoformat(f"{datum}T{uhrzeit}")
+    tage = [(start + timedelta(days=d)).date().isoformat() for d in (-1, 0, 1)]   # auch über Mitternacht
+    # Sperrt die Datenbank kurz zum Schreiben, damit zwei gleichzeitige Buchungen
+    # nicht beide "frei" sehen
+    con.execute("BEGIN IMMEDIATE")
+    rows = con.execute(
+        "SELECT datum, uhrzeit FROM buchung WHERE status != 'storniert' AND id != ? "
+        "AND datum IN (?, ?, ?)", (ausser_id or -1, *tage)).fetchall()
+    for r in rows:
+        beginn = datetime.fromisoformat(f"{r['datum']}T{r['uhrzeit']}")
+        if abs((beginn - start).total_seconds()) < SLOT_MINUTEN * 60:
+            ende = beginn + timedelta(minutes=SLOT_MINUTEN)
+            con.rollback()
+            return jsonify({"error": f"Dieser Termin ist nicht frei: am {beginn.strftime('%d.%m.%Y')} ist von "
+                                     f"{beginn.strftime('%H:%M')} bis {ende.strftime('%H:%M')} Uhr schon gebucht. "
+                                     "Bitte wähle eine andere Zeit."}), 409
+    return None
 
 
 def kunde_anlegen(data):
@@ -575,6 +598,25 @@ def delete_kunde(kunden_id):
 
 
 # ---- Buchungen ----
+@app.route("/belegt", methods=["GET"])
+def belegte_zeiten():
+    """Welche Zeiten sind an einem Tag schon vergeben? (ohne Namen, für jeden Angemeldeten)
+    /belegt?datum=2026-12-12   optional &ausser=<buchungsid> (die eigene Buchung beim Ändern)"""
+    try:
+        tag = date.fromisoformat(request.args.get("datum", "")).isoformat()
+    except ValueError:
+        return jsonify({"error": "datum=YYYY-MM-DD nötig"}), 400
+    rows = get_db().execute(
+        "SELECT uhrzeit FROM buchung WHERE status != 'storniert' AND datum = ? AND id != ? "
+        "ORDER BY uhrzeit", (tag, request.args.get("ausser", type=int) or -1)).fetchall()
+    belegt = []
+    for r in rows:
+        beginn = datetime.fromisoformat(f"{tag}T{r['uhrzeit']}")
+        belegt.append({"von": r["uhrzeit"],
+                       "bis": (beginn + timedelta(minutes=SLOT_MINUTEN)).strftime("%H:%M")})
+    return jsonify({"datum": tag, "dauer_minuten": SLOT_MINUTEN, "belegt": belegt})
+
+
 @app.route("/detailing_factory", methods=["GET"])
 def get_buchungen():
     con = get_db()
@@ -623,6 +665,10 @@ def add_buchung():
                                  "(datum: YYYY-MM-DD, uhrzeit: HH:MM)"}), 400
 
     con = get_db()
+    if status != "storniert":
+        fehler = termin_fehler(con, datum, uhrzeit)
+        if fehler:
+            return fehler
     try:
         # id, status und erstellungsdatum füllt die Datenbank selbst (DEFAULT)
         cur = con.execute(
@@ -649,11 +695,15 @@ def update_buchung(buchung_id):
     data = json_dict()
 
     if g.rolle == "kunde":
-        # Kunde darf nur stornieren, sonst nichts ändern
-        if set(data) - {"status"} or data.get("status") != "storniert":
-            return jsonify({"error": 'Kunden dürfen nur stornieren: {"status": "storniert"}'}), 403
-        if alt["status"] == "abgeschlossen":
-            return jsonify({"error": "Abgeschlossene Buchungen können nicht storniert werden"}), 409
+        # Kunde darf Termin, Paket und Autoart seiner EIGENEN Buchung ändern und sie stornieren
+        if set(data) - {"datum", "uhrzeit", "paketid", "autoid", "status"}:
+            return jsonify({"error": "Kunden dürfen nur datum, uhrzeit, paketid, autoid ändern "
+                                     "oder stornieren"}), 403
+        if "status" in data and data["status"] != "storniert":
+            return jsonify({"error": 'Kunden dürfen den Status nur auf "storniert" setzen'}), 403
+        if alt["status"] in ("storniert", "abgeschlossen"):
+            return jsonify({"error": f'Eine Buchung mit Status "{alt["status"]}" kann nicht '
+                                     'mehr geändert werden'}), 409
     elif "status" in data and data["status"] not in STATUS_WERTE:
         return jsonify({"error": f"status muss einer von {STATUS_WERTE} sein"}), 400
 
@@ -664,6 +714,15 @@ def update_buchung(buchung_id):
     except (ValueError, TypeError):
         return jsonify({"error": "Datum/Uhrzeit-Format falsch"}), 400
 
+    # Termin nur prüfen, wenn er sich ändert oder eine stornierte Buchung wieder aktiv wird
+    neuer_status = data.get("status", alt["status"])
+    zeit_geaendert = (datum, uhrzeit) != (alt["datum"], alt["uhrzeit"])
+    wieder_aktiv = alt["status"] == "storniert" and neuer_status != "storniert"
+    if neuer_status != "storniert" and (zeit_geaendert or wieder_aktiv):
+        fehler = termin_fehler(con, datum, uhrzeit, ausser_id=buchung_id)
+        if fehler:
+            return fehler
+
     try:
         con.execute(
             """UPDATE buchung
@@ -673,8 +732,7 @@ def update_buchung(buchung_id):
             (data.get("kundenid", alt["kundenid"]),
              data.get("paketid", alt["paketid"]),
              data.get("autoid", alt["autoid"]),
-             data.get("status", alt["status"]),
-             datum, uhrzeit, buchung_id),
+             neuer_status, datum, uhrzeit, buchung_id),
         )
         con.commit()
     except sqlite3.IntegrityError:

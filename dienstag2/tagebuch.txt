@@ -1,0 +1,2 @@
+was ich gemacht habe:
+html frontend als React nochmal programmiert
