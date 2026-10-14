@@ -19,6 +19,9 @@ export default function App() {
   const [pakete, setPakete] = useState([])
   const [autos, setAutos] = useState([])
   const [kunden, setKunden] = useState([])
+  const [kundensuche, setKundensuche] = useState('')
+  const [ausgewaehlterKunde, setAusgewaehlterKunde] = useState(null)
+  const [kundenDetailsOffen, setKundenDetailsOffen] = useState(false)
   const [buchungen, setBuchungen] = useState([])
 
   const [formular, setFormular] = useState({
@@ -201,6 +204,14 @@ export default function App() {
     await laden()
   }
 
+  const gefilterteKunden = kunden.filter(k => {
+  const suchtext = kundensuche.toLowerCase().trim()
+
+  return (
+    `${k.vorname} ${k.name}`.toLowerCase().includes(suchtext) ||
+    k.email.toLowerCase().includes(suchtext)
+  )
+  })
   const paket = pakete.find(p => String(p.id) === formular.paketid)
   const auto = autos.find(a => String(a.id) === formular.autoid)
   const preis = paket && auto
@@ -392,6 +403,85 @@ export default function App() {
           </section>
 
           <section className="karte">
+            {rolle === 'admin' && (
+  <div className="kundensuche">
+    <p className="eyebrow">KUNDENVERWALTUNG</p>
+    <h2>Kunden suchen</h2>
+
+    <input
+      type="search"
+      placeholder="Name, Vorname oder E-Mail eingeben ..."
+      value={kundensuche}
+      onChange={e => setKundensuche(e.target.value)}
+    />
+
+    {kundensuche.trim() !== '' && (
+      <div className="kundensuche-ergebnisse">
+        {gefilterteKunden.map(k => (
+          <button
+            type="button"
+            key={k.id}
+            onClick={() => {
+              setAusgewaehlterKunde(k)
+              setKundenDetailsOffen(true)
+            }}
+          >
+            {k.vorname} {k.name} – {k.email}
+          </button>
+        ))}
+
+        {gefilterteKunden.length === 0 && (
+          <p>Kein Kunde gefunden.</p>
+        )}
+      </div>
+    )}
+
+    {kundenDetailsOffen && ausgewaehlterKunde && (
+      <div className="kunden-details">
+        <h3>
+          {ausgewaehlterKunde.vorname} {ausgewaehlterKunde.name}
+        </h3>
+
+        <p>E-Mail: {ausgewaehlterKunde.email}</p>
+        <p>Adresse: {ausgewaehlterKunde.adresse} {ausgewaehlterKunde.hausnummer}</p>
+        <p>PLZ / Ort: {ausgewaehlterKunde.plz} {ausgewaehlterKunde.ort}</p>
+        <p>Telefon: {ausgewaehlterKunde.telefonnummer}</p>
+
+        <h3>Buchungen dieses Kunden</h3>
+
+        {buchungen.filter(
+          b => b.kundenid === ausgewaehlterKunde.id
+        ).length === 0 ? (
+          <p>Dieser Kunde hat keine Buchungen.</p>
+        ) : (
+          <ul>
+            {buchungen
+              .filter(b => b.kundenid === ausgewaehlterKunde.id)
+              .map(b => (
+                <li key={b.buchungsid}>
+                  Buchung Nr. {b.buchungsid} – {b.datum},
+                  {' '}{b.uhrzeit} – {b.status} – {b.preis} €
+                  <button
+                    type="button"
+                    onClick={() => bearbeiten(b)}
+                  >
+                    Buchung bearbeiten
+                  </button>
+                </li>
+              ))}
+          </ul>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setKundenDetailsOffen(false)}
+        >
+          Details schließen
+        </button>
+      </div>
+    )}
+  </div>
+)}
             <p className="eyebrow">ÜBERSICHT</p>
             <h2>{rolle === 'admin' ? 'Alle Buchungen' : 'Meine Buchungen'}</h2>
 
@@ -431,17 +521,28 @@ export default function App() {
                           <td>{a?.autoart || b.autoid}</td>
                           <td>{b.preis} €</td>
                           <td>
-                            {rolle === 'admin' ? (
-                              <select value={b.status}
-                                onChange={e => aktion(
-                                  `/detailing_factory/${b.buchungsid}`,
-                                  'PUT',
-                                  { status: e.target.value }
-                                )}>
-                                {STATUS.map(s => <option key={s}>{s}</option>)}
-                              </select>
-                            ) : b.status}
-                          </td>
+  <span className={`status-badge status-${b.status}`}>
+    {rolle === 'admin' ? (
+      <select
+        className="status-auswahl"
+        value={b.status}
+        onChange={e => aktion(
+          `/detailing_factory/${b.buchungsid}`,
+          'PUT',
+          { status: e.target.value }
+        )}
+      >
+        {STATUS.map(s => (
+          <option key={s} value={s}>
+            {s.charAt(0).toUpperCase() + s.slice(1)}
+          </option>
+        ))}
+      </select>
+    ) : (
+      b.status.charAt(0).toUpperCase() + b.status.slice(1)
+    )}
+  </span>
+</td>
                           <td className="aktionen">
                             <button disabled={
                               rolle !== 'admin' &&

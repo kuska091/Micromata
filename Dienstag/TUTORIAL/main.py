@@ -3,12 +3,13 @@ import secrets
 import sqlite3
 from datetime import date, datetime, time, timedelta, timezone
 
+import shutil
 import jwt                                   # pip install pyjwt
 from flask import Flask, g, jsonify, redirect, request, send_from_directory
 from werkzeug.security import check_password_hash, generate_password_hash
-
+from flask_cors import CORS
 app = Flask(__name__)
-
+CORS(app)
 # JSON-Felder in der Reihenfolge der SELECT-Abfrage ausgeben (nicht alphabetisch)
 app.json.sort_keys = False
 app.config["JSON_SORT_KEYS"] = False
@@ -776,3 +777,9 @@ def delete_buchung(buchung_id):
 
 if __name__ == "__main__":
     app.run(debug=True)
+
+
+    from mangum import Mangum
+
+# Dieser Handler dient als Einstiegspunkt für AWS Lambda
+handler = Mangum(app)

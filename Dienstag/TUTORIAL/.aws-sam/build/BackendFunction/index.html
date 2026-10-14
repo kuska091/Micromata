@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Detailing Factory</title>
+<style>
+:root { --bg:#f5f4f0; --card:#fff; --ink:#1c1c20; --muted:#6a6a74; --line:#e3e1da; --accent:#1a56db; --bad:#b3261e; --ok:#1b7a3a; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#131316; --card:#1c1c21; --ink:#f0f0f3; --muted:#9a9aa5; --line:#2c2c33; --accent:#6f9cff; --bad:#ff8a80; --ok:#7bd88f; }
+}
+* { box-sizing: border-box; }
+body { margin:0; font:16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+main { max-width:820px; margin:0 auto; padding:32px 16px 64px; }
+h1 { font-size:1.5rem; margin:0 0 4px; }
+h2 { font-size:1.05rem; margin:0 0 12px; }
+.sub { color:var(--muted); margin:0 0 24px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:24px; margin-bottom:16px; }
+label { display:block; font-size:.85rem; color:var(--muted); margin:12px 0 4px; }
+input, select { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--ink); font:inherit; }
+select option { color:#000; }
+.row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:transparent; color:var(--ink); cursor:pointer; }
+button.primary { background:var(--accent); border-color:var(--accent); color:#fff; margin-top:16px; }
+button.danger { color:var(--bad); }
+button:disabled { opacity:.4; cursor:default; }
+.tabs { display:flex; gap:8px; margin-bottom:8px; }
+.tabs button.aktiv { background:var(--accent); border-color:var(--accent); color:#fff; }
+#meldung { min-height:1.5em; margin:0 0 16px; }
+#meldung.fehler { color:var(--bad); } #meldung.ok { color:var(--ok); }
+.top { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+.preis { margin-top:12px; font-weight:600; }
+.table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; font-size:.92rem; }
+th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); white-space:nowrap; }
+th { color:var(--muted); font-weight:500; }
+td select { padding:4px 8px; width:auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Detailing Factory</h1>
+  <p class="sub">Buche dein Autopflege-Paket online.</p>
+  <p id="meldung"></p>
+
+  <section id="auth" class="card" hidden>
+    <div class="tabs">
+      <button id="tabLogin" type="button">Anmelden</button>
+      <button id="tabReg" type="button">Registrieren</button>
+    </div>
+
+    <form id="loginForm">
+      <label>E-Mail</label><input id="l_email" type="email" autocomplete="username" required>
+      <label>Passwort</label><input id="l_passwort" type="password" autocomplete="current-password" required>
+      <button class="primary" type="submit">Anmelden</button>
+    </form>
+
+    <form id="regForm" hidden>
+      <div class="row">
+        <div><label>Vorname</label><input id="r_vorname" required></div>
+        <div><label>Name</label><input id="r_name" required></div>
+      </div>
+      <label>E-Mail</label><input id="r_email" type="email" autocomplete="username" required>
+      <label>Passwort (mindestens 8 Zeichen)</label><input id="r_passwort" type="password" minlength="8" autocomplete="new-password" required>
+      <div class="row">
+        <div><label>Straße</label><input id="r_adresse" required></div>
+        <div><label>Hausnummer</label><input id="r_hausnummer" required></div>
+      </div>
+      <div class="row">
+        <div><label>PLZ</label><input id="r_plz" required></div>
+        <div><label>Ort</label><input id="r_ort" required></div>
+      </div>
+      <label>Telefonnummer</label><input id="r_telefonnummer" required>
+      <button class="primary" type="submit">Konto anlegen</button>
+    </form>
+  </section>
+
+  <section id="app" hidden>
+    <div class="top">
+      <span>Angemeldet als <strong id="wer"></strong></span>
+      <button id="logoutBtn" type="button">Abmelden</button>
+    </div>
+
+    <div class="card">
+      <h2 id="buchTitel">Neue Buchung</h2>
+      <form id="buchForm">
+        <div id="b_kunde_wrap" hidden><label>Kunde</label><select id="b_kunde"></select></div>
+        <div class="row">
+          <div><label>Paket</label><select id="b_paket"></select></div>
+          <div><label>Autoart</label><select id="b_auto"></select></div>
+        </div>
+        <div class="row">
+          <div><label>Datum</label><input id="b_datum" type="date" required></div>
+          <div><label>Uhrzeit</label><input id="b_uhrzeit" type="time" required></div>
+        </div>
+        <p id="belegt" class="sub" style="margin:8px 0 0"></p>
+        <p class="preis">Preis: <span id="b_preis">–</span></p>
+        <button class="primary" id="buchBtn" type="submit">Buchen</button>
+        <button id="abbruchBtn" type="button" style="margin-top:16px" hidden>Abbrechen</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2 id="listeTitel">Meine Buchungen</h2>
+      <div class="table-wrap">
+        <table>
+          <thead id="kopf"></thead>
+          <tbody id="liste"></tbody>
+        </table>
+      </div>
+      <p id="leer" class="sub" hidden>Noch keine Buchungen.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const STATUS = ["offen", "bestätigt", "storniert", "abgeschlossen"];
+let rolle = null, pakete = [], autos = [], kunden = [];
+
+function ansicht(name) { $("auth").hidden = (name !== "auth"); $("app").hidden = (name !== "app"); }
+function tab(welcher) {
+  $("loginForm").hidden = (welcher !== "login");
+  $("regForm").hidden = (welcher !== "reg");
+  $("tabLogin").classList.toggle("aktiv", welcher === "login");
+  $("tabReg").classList.toggle("aktiv", welcher === "reg");
+}
+function meldung(text, art) { const m = $("meldung"); m.textContent = text || ""; m.className = art || ""; }
+
+async function senden(pfad, methode, body, token) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = "Bearer " + token;
+  const r = await fetch(pfad, { method: methode, headers, body: body ? JSON.stringify(body) : undefined });
+  return { status: r.status, data: await r.json().catch(() => ({})) };
+}
+
+// Anfrage mit Token. Ist er abgelaufen oder gesperrt (401), geht es zurück zum Login.
+async function api(pfad, methode = "GET", body) {
+  const res = await senden(pfad, methode, body, sessionStorage.getItem("token"));
+  if (res.status === 401) {
+    sessionStorage.clear();
+    ansicht("auth"); tab("login");
+    meldung("Sitzung abgelaufen, bitte neu anmelden.", "fehler");
+    return null;
+  }
+  return res;
+}
+
+// ---------- Anmelden / Registrieren ----------
+$("tabLogin").addEventListener("click", () => { tab("login"); meldung(""); });
+$("tabReg").addEventListener("click", () => { tab("reg"); meldung(""); });
+
+$("loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const email = $("l_email").value.trim();
+  const res = await senden("/login", "POST", { email, passwort: $("l_passwort").value });
+  if (res.status !== 200) return meldung(res.data.error || "Anmeldung fehlgeschlagen.", "fehler");
+  sessionStorage.setItem("token", res.data.access_token);
+  sessionStorage.setItem("rolle", res.data.role);
+  sessionStorage.setItem("wer", email);
+  $("l_passwort").value = "";
+  meldung("");
+  zeigeApp();
+});
+
+$("regForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const body = {};
+  for (const f of ["vorname", "name", "email", "passwort", "adresse", "hausnummer", "plz", "ort", "telefonnummer"])
+    body[f] = $("r_" + f).value;
+  const res = await senden("/register", "POST", body);
+  if (res.status === 201) {
+    $("l_email").value = body.email;
+    $("regForm").reset();
+    tab("login");
+    return meldung("Konto angelegt. Bitte melde dich jetzt an.", "ok");
+  }
+  if (res.status === 409) {                       // E-Mail gibt es schon
+    $("l_email").value = body.email;
+    tab("login");
+  }
+  meldung(res.data.error || "Registrierung fehlgeschlagen.", "fehler");
+});
+
+$("logoutBtn").addEventListener("click", async () => {
+  await api("/logout", "POST");                   // Token auf dem Server sperren
+  sessionStorage.clear();
+  ansicht("auth"); tab("login");
+  meldung("Du bist abgemeldet.", "ok");
+});
+
+// ---------- Buchungen ----------
+async function zeigeApp() {
+  rolle = sessionStorage.getItem("rolle");
+  $("wer").textContent = sessionStorage.getItem("wer") + (rolle === "admin" ? " (Admin)" : "");
+  ansicht("app");
+  const anfragen = [api("/pakete"), api("/autoarten")];
+  if (rolle === "admin") anfragen.push(api("/kunden"));
+  const res = await Promise.all(anfragen);
+  if (res.some(r => !r)) return;
+  pakete = res[0].data; autos = res[1].data;
+  kunden = rolle === "admin" ? res[2].data : [];
+  formularFuellen();
+  bearbeitenBeenden();
+  ladeBuchungen();
+}
+
+function optionen(select, liste, text) {
+  select.replaceChildren(...liste.map(x => new Option(text(x), x.id)));
+}
+
+function preisAnzeigen() {
+  const p = pakete.find(x => String(x.id) === $("b_paket").value);
+  const a = autos.find(x => String(x.id) === $("b_auto").value);
+  $("b_preis").textContent = (p && a) ? (p.preis + a.aufschlag) + " €" : "–";
+}
+
+function formularFuellen() {
+  optionen($("b_paket"), pakete, p => `${p.paket} (${p.preis} €)`);
+  optionen($("b_auto"), autos, a => `${a.autoart} (+${a.aufschlag} €)`);
+  $("b_kunde_wrap").hidden = (rolle !== "admin");
+  if (rolle === "admin") optionen($("b_kunde"), kunden, k => `${k.vorname} ${k.name} (${k.email})`);
+  $("b_datum").min = new Date().toISOString().slice(0, 10);
+  $("listeTitel").textContent = rolle === "admin" ? "Alle Buchungen" : "Meine Buchungen";
+  preisAnzeigen();
+}
+$("b_paket").addEventListener("change", preisAnzeigen);
+$("b_auto").addEventListener("change", preisAnzeigen);
+
+let bearbeiteId = null;      // Nummer der Buchung, die gerade geändert wird (sonst null)
+
+// Zeigt, welche Zeiten am gewählten Tag schon vergeben sind
+async function belegtLaden() {
+  const tag = $("b_datum").value, info = $("belegt");
+  if (!tag) { info.textContent = ""; return; }
+  const res = await api(`/belegt?datum=${tag}` + (bearbeiteId ? `&ausser=${bearbeiteId}` : ""));
+  if (!res || res.status !== 200) return;
+  const zeiten = res.data.belegt.map(b => `${b.von}–${b.bis}`);
+  info.textContent = zeiten.length
+    ? `Schon belegt am ${tag.split("-").reverse().join(".")}: ${zeiten.join(", ")} Uhr. Ein Termin dauert ${res.data.dauer_minuten} Minuten.`
+    : "An diesem Tag sind noch alle Zeiten frei.";
+}
+$("b_datum").addEventListener("change", belegtLaden);
+
+function bearbeitenBeenden() {
+  bearbeiteId = null;
+  $("buchForm").reset();
+  $("buchTitel").textContent = "Neue Buchung";
+  $("buchBtn").textContent = "Buchen";
+  $("abbruchBtn").hidden = true;
+  $("b_datum").min = new Date().toISOString().slice(0, 10);
+  $("belegt").textContent = "";
+  preisAnzeigen();
+}
+$("abbruchBtn").addEventListener("click", () => { bearbeitenBeenden(); meldung(""); });
+
+// Füllt das Formular mit einer bestehenden Buchung, damit man sie ändern kann
+function bearbeitenStarten(b) {
+  bearbeiteId = b.buchungsid;
+  $("b_paket").value = b.paketid;
+  $("b_auto").value = b.autoid;
+  $("b_datum").min = "";                 // auch alte Termine dürfen geändert werden
+  $("b_datum").value = b.datum;
+  $("b_uhrzeit").value = b.uhrzeit;
+  if (rolle === "admin") $("b_kunde").value = b.kundenid;
+  $("buchTitel").textContent = `Buchung Nr. ${b.buchungsid} ändern`;
+  $("buchBtn").textContent = "Änderung speichern";
+  $("abbruchBtn").hidden = false;
+  preisAnzeigen(); belegtLaden(); meldung("");
+  $("buchForm").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+$("buchForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const body = { paketid: +$("b_paket").value, autoid: +$("b_auto").value,
+                 datum: $("b_datum").value, uhrzeit: $("b_uhrzeit").value };
+  if (rolle === "admin") body.kundenid = +$("b_kunde").value;
+  const aendern = bearbeiteId !== null;
+  const res = aendern ? await api(`/detailing_factory/${bearbeiteId}`, "PUT", body)
+                      : await api("/detailing_factory", "POST", body);
+  if (!res) return;
+  if (res.status >= 400) {               // z. B. 409: Termin schon vergeben
+    belegtLaden();
+    return meldung(res.data.error || "Speichern fehlgeschlagen.", "fehler");
+  }
+  meldung(`Buchung Nr. ${res.data.buchungsid} ${aendern ? "geändert" : "angelegt"} (${res.data.preis} €).`, "ok");
+  bearbeitenBeenden();
+  ladeBuchungen();
+});
+
+function zelle(text) { const td = document.createElement("td"); td.textContent = text; return td; }
+
+async function aktion(pfad, methode, body) {
+  const res = await api(pfad, methode, body);
+  if (!res) return;
+  if (res.status >= 400) meldung(res.data.error || "Fehler", "fehler"); else meldung("");
+  ladeBuchungen();
+}
+
+async function ladeBuchungen() {
+  const res = await api("/detailing_factory");
+  if (!res) return;
+  const liste = res.data;
+  const spalten = ["Nr."].concat(rolle === "admin" ? ["Kunde"] : [], ["Datum", "Uhrzeit", "Paket", "Auto", "Preis", "Status", ""]);
+  const tr0 = document.createElement("tr");
+  for (const s of spalten) { const th = document.createElement("th"); th.textContent = s; tr0.appendChild(th); }
+  $("kopf").replaceChildren(tr0);
+
+  $("leer").hidden = liste.length > 0;
+  const tbody = $("liste");
+  tbody.replaceChildren();
+  for (const b of liste) {
+    const tr = document.createElement("tr");
+    tr.appendChild(zelle(b.buchungsid));
+    if (rolle === "admin") {
+      const k = kunden.find(x => x.id === b.kundenid);
+      tr.appendChild(zelle(k ? `${k.vorname} ${k.name}` : "Kunde " + b.kundenid));
+    }
+    const p = pakete.find(x => x.id === b.paketid), a = autos.find(x => x.id === b.autoid);
+    for (const t of [b.datum, b.uhrzeit, p ? p.paket : b.paketid, a ? a.autoart : b.autoid, b.preis + " €"])
+      tr.appendChild(zelle(t));
+
+    const statusTd = document.createElement("td");
+    if (rolle === "admin") {                      // Admin ändert den Status per Auswahl
+      const sel = document.createElement("select");
+      sel.replaceChildren(...STATUS.map(s => new Option(s, s)));
+      sel.value = b.status;
+      sel.addEventListener("change", () => aktion(`/detailing_factory/${b.buchungsid}`, "PUT", { status: sel.value }));
+      statusTd.appendChild(sel);
+    } else statusTd.textContent = b.status;
+    tr.appendChild(statusTd);
+
+    const td = document.createElement("td");
+    const storno = document.createElement("button");
+    storno.textContent = "Stornieren";
+    storno.disabled = ["storniert", "abgeschlossen"].includes(b.status) && rolle !== "admin" || b.status === "storniert";
+    storno.addEventListener("click", () => aktion(`/detailing_factory/${b.buchungsid}/stornieren`, "POST"));
+    const weg = document.createElement("button");
+    weg.textContent = "Löschen";
+    weg.className = "danger";
+    weg.addEventListener("click", () => {
+      if (confirm("Buchung wirklich löschen?")) aktion(`/detailing_factory/${b.buchungsid}`, "DELETE");
+    });
+    const aendern = document.createElement("button");
+    aendern.textContent = "Ändern";
+    aendern.disabled = rolle !== "admin" && ["storniert", "abgeschlossen"].includes(b.status);
+    aendern.addEventListener("click", () => bearbeitenStarten(b));
+    td.append(aendern, " ", storno, " ", weg);
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+}
+
+// ---------- Start ----------
+if (sessionStorage.getItem("token")) zeigeApp(); else { ansicht("auth"); tab("login"); }
+</script>
+</body>
+</html>

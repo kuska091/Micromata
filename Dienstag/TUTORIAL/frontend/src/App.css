@@ -331,3 +331,101 @@ footer {
     padding: 24px 12px;
   }
 }
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+/* Abgeschlossen = Grün */
+.status-abgeschlossen {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+/* Storniert = Rot */
+.status-storniert {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+/* Bestätigt = Gelb */
+.status-bestätigt {
+  color: #fde68a;
+  background: rgba(234, 179, 8, 0.15);
+  border-color: rgba(234, 179, 8, 0.4);
+}
+
+/* Offen = Grau */
+.status-offen {
+  color: #d1d5db;
+  background: rgba(156, 163, 175, 0.12);
+  border-color: rgba(156, 163, 175, 0.3);
+}
+
+/* Auswahlfeld für Administratoren */
+.status-auswahl {
+  width: auto;
+  min-width: 105px;
+  margin: 0;
+  padding: 3px 5px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.status-auswahl option {
+  background: #202124;
+  color: #fff;
+}
+.kundensuche {
+  margin-bottom: 24px;
+  padding: 22px;
+  border: 1px solid #474033;
+  border-radius: 14px;
+  background: #1b1c1e;
+}
+
+.kundensuche-ergebnisse {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.kundensuche-ergebnisse button {
+  text-align: left;
+}
+
+.kunden-details {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid #474033;
+  border-radius: 12px;
+  background: #151618;
+  overflow-wrap: anywhere;
+}
+
+.kunden-details p {
+  margin-bottom: 10px;
+  color: #d0d0d0;
+}
+
+.kunden-details li {
+  margin-bottom: 12px;
+}
+
+.kunden-details li button {
+  margin-left: 10px;
+}
