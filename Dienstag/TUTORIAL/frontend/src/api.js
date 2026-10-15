@@ -1,3 +1,6 @@
+
+const API_BASE_URL = "https://<DEINE-API-ID>.execute-api.eu-central-1.amazonaws.com/Prod";
+
 export async function senden(pfad, methode = "GET", body, token) {
   const headers = {
     "Content-Type": "application/json"

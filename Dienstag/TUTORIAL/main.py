@@ -1,4 +1,6 @@
 import os
+from flask_cors import CORS
+from mangum import Mangum
 import secrets
 import sqlite3
 from datetime import date, datetime, time, timedelta, timezone
@@ -131,8 +133,14 @@ def ganze_zahl(wert):
 # ---------------------------------------------------------------
 # Datenbank: das komplette Schema als SQL
 # ---------------------------------------------------------------
-DB_FILE = "detailing_factory.db"
-
+# In AWS Lambda ist nur das Verzeichnis /tmp beschreibbar!
+if os.environ.get("AWS_EXECUTION_ENV"):
+    DB_FILE = "/tmp/detailing_factory.db"
+    SRC_DB = os.path.join(os.path.dirname(__file__), "detailing_factory.db")
+    if not os.path.exists(DB_FILE) and os.path.exists(SRC_DB):
+        shutil.copy(SRC_DB, DB_FILE)
+else:
+    DB_FILE = "detailing_factory.db"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS kunde (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -774,12 +782,11 @@ def delete_buchung(buchung_id):
     con.commit()
     return jsonify({"message": "Buchung gelöscht"})
 
+# Einstiegspunkt für AWS Lambda
+
 
 if __name__ == "__main__":
     app.run(debug=True)
 
-
-    from mangum import Mangum
-
-# Dieser Handler dient als Einstiegspunkt für AWS Lambda
-handler = Mangum(app)
+from asgiref.wsgi import WsgiToAsgi
+handler = Mangum(WsgiToAsgi(app), lifespan="off")

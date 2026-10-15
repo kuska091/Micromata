@@ -1,46 +1,54 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
-Description: Detailing Factory Serverless Stack
-
-Globals:
-  Function:
-    Timeout: 15
-    MemorySize: 256
-    Runtime: python3.12
+Description: 'Serverless Setup: S3 Bucket und Lambda Funktion'
 
 Resources:
-  # 1. S3 Bucket für das React Frontend
-  FrontendBucket:
-    Type: AWS::S3::Bucket
+  # 1. S3 Bucket
+  MeinS3Bucket:
+    Type: 'AWS::S3::Bucket'
     Properties:
-      BucketName: !Sub "detailing-factory-frontend-${AWS::AccountId}"
-      WebsiteConfiguration:
-        IndexDocument: index.html
-        ErrorDocument: index.html
+      # BucketName: !Sub '${AWS::StackName}-mein-bucket-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
 
-  # 2. AWS Lambda Funktion für das Python/Flask Backend
-  BackendFunction:
-    Type: AWS::Serverless::Function
+  # 2. IAM Rolle für Lambda (Ausführungsrechte)
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
     Properties:
-      CodeUri: ./
-      Handler: main.handler
-      Environment:
-        Variables:
-          JWT_SECRET: "sicheres_geheimnis_mind_32_zeichen_lang"
-          ADMIN_EMAIL: "admin@detailing-factory.de"
-          ADMIN_PASSWORD: "dein_admin_passwort"
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            Path: /{proxy+}
-            Method: ANY
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+
+  # 3. Lambda Funktion
+  MeineLambdaFunktion:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      # FunctionName: !Sub '${AWS::StackName}-meine-funktion'
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.11
+      Code:
+        ZipFile: |
+          import json
+
+          def lambda_handler(event, context):
+              print("Lambda wurde erfolgreich aufgerufen!")
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Hallo aus der Lambda-Funktion!')
+              }
 
 Outputs:
-  FrontendBucketName:
-    Description: "Name des S3 Buckets für das Frontend"
-    Value: !Ref FrontendBucket
-
-  BackendApiUrl:
-    Description: "URL des API Gateways für das Backend"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  BucketName:
+    Description: 'Name des erstellten S3 Buckets'
+    Value: !Ref MeinS3Bucket
+  LambdaArn:
+    Description: 'ARN der erstellten Lambda Funktion'
+    Value: !GetAtt MeineLambdaFunktion.Arn

@@ -1,44 +1,47 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
-Description: Detailing Factory Serverless Stack
-Globals:
-  Function:
-    Timeout: 15
-    MemorySize: 256
-    Runtime: python3.12
+Description: 'Serverless Setup: S3 Bucket und Lambda Funktion'
 Resources:
-  FrontendBucket:
+  MeinS3Bucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName:
-        Fn::Sub: detailing-factory-frontend-${AWS::AccountId}
-      WebsiteConfiguration:
-        IndexDocument: index.html
-        ErrorDocument: index.html
-  BackendFunction:
-    Type: AWS::Serverless::Function
+      VersioningConfiguration:
+        Status: Enabled
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
     Properties:
-      CodeUri: BackendFunction
-      Handler: main.handler
-      Environment:
-        Variables:
-          JWT_SECRET: sicheres_geheimnis_mind_32_zeichen_lang
-          ADMIN_EMAIL: admin@detailing-factory.de
-          ADMIN_PASSWORD: dein_admin_passwort
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            Path: /{proxy+}
-            Method: ANY
-    Metadata:
-      SamResourceId: BackendFunction
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  MeineLambdaFunktion:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role:
+        Fn::GetAtt:
+        - LambdaExecutionRole
+        - Arn
+      Runtime: python3.11
+      Code:
+        ZipFile: "import json\n\ndef lambda_handler(event, context):\n    print(\"\
+          Lambda wurde erfolgreich aufgerufen!\")\n    return {\n        'statusCode':\
+          \ 200,\n        'body': json.dumps('Hallo aus der Lambda-Funktion!')\n \
+          \   }\n"
 Outputs:
-  FrontendBucketName:
-    Description: "Name des S3 Buckets f\xFCr das Frontend"
+  BucketName:
+    Description: Name des erstellten S3 Buckets
     Value:
-      Ref: FrontendBucket
-  BackendApiUrl:
-    Description: "URL des API Gateways f\xFCr das Backend"
+      Ref: MeinS3Bucket
+  LambdaArn:
+    Description: ARN der erstellten Lambda Funktion
     Value:
-      Fn::Sub: https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/
+      Fn::GetAtt:
+      - MeineLambdaFunktion
+      - Arn
