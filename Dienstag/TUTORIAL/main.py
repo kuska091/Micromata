@@ -1,15 +1,16 @@
 import os
-from flask_cors import CORS
-from mangum import Mangum
 import secrets
 import sqlite3
+import shutil
+
 from datetime import date, datetime, time, timedelta, timezone
 
-import shutil
-import jwt                                   # pip install pyjwt
+import jwt
 from flask import Flask, g, jsonify, redirect, request, send_from_directory
-from werkzeug.security import check_password_hash, generate_password_hash
 from flask_cors import CORS
+from werkzeug.security import check_password_hash, generate_password_hash
+from mangum import Mangum
+from asgiref.wsgi import WsgiToAsgi
 app = Flask(__name__)
 CORS(app)
 # JSON-Felder in der Reihenfolge der SELECT-Abfrage ausgeben (nicht alphabetisch)
@@ -370,10 +371,22 @@ def login():
 
 
 # ---- Webseite (ohne Token erreichbar, sonst käme man nie zum Login) ----
+FRONTEND_DIST = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "frontend_dist"
+)
+
 @app.route("/app")
 def webseite():
-    ordner = os.path.dirname(os.path.abspath(__file__))
-    return send_from_directory(ordner, "index.html")
+    return send_from_directory(FRONTEND_DIST, "index.html")
+
+
+@app.route("/assets/<path:filename>")
+def frontend_assets(filename):
+    return send_from_directory(
+        os.path.join(FRONTEND_DIST, "assets"),
+        filename
+    )
 
 
 @app.route("/logout", methods=["POST"])
@@ -788,5 +801,14 @@ def delete_buchung(buchung_id):
 if __name__ == "__main__":
     app.run(debug=True)
 
-from asgiref.wsgi import WsgiToAsgi
+
 handler = Mangum(WsgiToAsgi(app), lifespan="off")
+
+
+
+
+
+
+
+
+#   detailing-factory-stack-MeineLambdaFunktion-WZlw55WaOOWa

@@ -1,26 +1,28 @@
-
-const API_BASE_URL = "https://<DEINE-API-ID>.execute-api.eu-central-1.amazonaws.com/Prod";
+const API_BASE_URL =
+  "https://n7wbdyuzel.execute-api.eu-central-1.amazonaws.com/default";
 
 export async function senden(pfad, methode = "GET", body, token) {
   const headers = {
-    "Content-Type": "application/json"
+    "Content-Type": "application/json",
   };
 
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(pfad, {
+  const route = pfad.startsWith("/") ? pfad : `/${pfad}`;
+
+  const response = await fetch(`${API_BASE_URL}${route}`, {
     method: methode,
     headers,
-    body: body ? JSON.stringify(body) : undefined
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
   const data = await response.json().catch(() => ({}));
 
   return {
     status: response.status,
-    data
+    data,
   };
 }
 
